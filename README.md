@@ -1,147 +1,73 @@
-# SentraShield — Native Local Setup Guide (No AWS & No Docker)
+# SentraShield — Cloud SOC & Web Application Firewall Platform
 
-SentraShield is a multi-tier web application security platform featuring an API backend, a custom rule-based Web Application Firewall (WAF) reverse proxy, a vulnerability scanner engine, an administrative React dashboard, and a local vulnerable test target application.
-
----
-
-## 1. System Architecture & Port Map
-
-| Component | Technology | Default Port | Description |
-| :--- | :--- | :--- | :--- |
-| **PostgreSQL Database** | PostgreSQL 14+ | `5432` | Relational storage for tenants, users, sites, scans, and WAF logs |
-| **Backend API** | FastAPI + Uvicorn | `8000` | Core REST API for site management, scan executions, and analytics |
-| **WAF Reverse Proxy** | Python HTTP Proxy | `8080` | Traffic inspection, anomaly scoring, blocking, and logging engine |
-| **Web Dashboard** | React + Vite | `3000` | Management UI for registered sites, scans, and real-time WAF telemetry |
-| **Custom Vuln App** | Python Flask | `5000` | Intentionally vulnerable local mock application for WAF testing |
+SentraShield is a full-stack, cloud-integrated Web Application Firewall (WAF) reverse proxy, vulnerability assessment engine, and Security Operations Center (SOC) dashboard. It intercepts incoming HTTP traffic in real time, scores anomalies, neutralizes injection vectors (SQLi, XSS), forwards safe traffic downstream, and streams threat telemetry to an operations console.
 
 ---
 
-## 2. Prerequisites & Environment Setup
+## 🌐 Live Deployments
 
-Ensure the following tools are installed directly on your machine:
-- **Python 3.10+** (with `pip` and `venv`)
-- **Node.js 18+** & **npm**
-- **PostgreSQL 14+** (running natively as a system service)
-
----
-
-## 3. Database Initialization
-
-1. Start your local PostgreSQL service:
-   - **Linux (Ubuntu/Debian):** `sudo systemctl start postgresql`
-   - **macOS:** `brew services start postgresql@14`
-   - **Windows:** Ensure the PostgreSQL service is started in `services.msc`.
-
-2. Create the project user and database:
-   ```bash
-   sudo -u postgres psql -c "CREATE USER sentra WITH PASSWORD 'sentra_password';"
-   sudo -u postgres psql -c "CREATE DATABASE sentrashield OWNER sentra;"
-   sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE sentrashield TO sentra;"
-   ```
+| Component | Platform | URL / Endpoint |
+| :--- | :--- | :--- |
+| **SOC Dashboard (Frontend)** | Vercel | https://sentrashield-gray.vercel.app |
+| **Core API Backend** | Render | https://sentrashield-api.onrender.com |
+| **Relational Database** | Neon DB | Serverless PostgreSQL (`neondb`) |
+| **WAF Reverse Proxy** | Local / Edge | http://localhost:8080 |
+| **Mock Target Application** | Local Testbed | http://localhost:5000 |
 
 ---
 
-## 4. Backend & WAF Setup
+## 🚀 Key Features
 
-### Step A: Configure Backend Environment
-Navigate into the backend directory and configure your Python environment:
-```bash
-cd backend
-python3 -m venv .venv
-
-# Activate Virtual Environment:
-source .venv/bin/activate       # On Linux/macOS
-# .venv\Scripts\activate      # On Windows (PowerShell/CMD)
-
-pip install --upgrade pip
-pip install -r requirements.txt
-cp .env.example .env
-```
-
-Ensure `.env` matches your local database credentials:
-```env
-DATABASE_URL=postgresql://sentra:sentra_password@localhost:5432/sentrashield
-WAF_PORT=8080
-API_PORT=8000
-```
-
-### Step B: Start Backend API (Terminal 1)
-```bash
-cd backend
-source .venv/bin/activate
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-```
-*API Swagger Documentation will be available at:* `http://localhost:8000/docs`
-
-### Step C: Start WAF Proxy Engine (Terminal 2)
-```bash
-cd backend
-source .venv/bin/activate
-python run_waf.py
-```
-*The proxy will output:* `[*] SentraShield WAF Proxy listening on 0.0.0.0:8080`
+* **Real-Time Signature & Heuristic WAF:** Inline inspection of HTTP query strings, headers, and request bodies for SQL Injection (`UNION SELECT`, `' OR 1=1--`), Cross-Site Scripting (`<script>`, inline event handlers), and path anomalies.
+* **Automated Threat Neutralization:** Blocks malicious payloads with `403 Forbidden` and a real-time event log; transparently proxies legitimate requests to downstream targets with `200 OK`.
+* **Live SOC Telemetry Stream:** Dynamic 3.5s polling displaying real-time security events, anomaly scores, client IP tags, and action triggers.
+* **Integrated Vulnerability Engine:** On-demand target auditing for missing security headers (`Content-Security-Policy`, `X-Frame-Options`, `X-Content-Type-Options`, `HSTS`) with risk score reflection.
+* **Multi-Tenant Architecture:** Target site isolation with scoped API keys and tokenized telemetry ingestion.
 
 ---
 
-## 5. Local Vulnerable Target Setup (Terminal 3)
+## 🛠 Tech Stack
 
-The custom vulnerable app runs on port `5000` and acts as the destination target for scanner probes and WAF proxy forwarding.
-
-```bash
-cd custom_vuln_app
-python3 -m venv .venv
-
-# Activate Virtual Environment:
-source .venv/bin/activate       # On Linux/macOS
-# .venv\Scripts\activate      # On Windows
-
-pip install -r requirements.txt
-python app.py
-```
-*Accessible directly at:* `http://127.0.0.1:5000`
+* **Backend & API:** Python 3, FastAPI, SQLAlchemy 2.0, Uvicorn, Requests
+* **Database & ORM:** Neon Serverless PostgreSQL (`psycopg2-binary` driver)
+* **Frontend:** React (Vite), Tailwind CSS, Lucide Icons, Axios
+* **Proxy Engine:** Python HTTP Reverse Proxy (`run_waf.py`)
+* **Deployment & CI/CD:** Render (Web Service), Vercel (SPA Frontend), Git
 
 ---
 
-## 6. Frontend Dashboard Setup (Terminal 4)
+## ⚡ Quickstart & Local Reproduction
 
-```bash
-cd frontend
-npm install
-npm run dev
-```
-Open your browser and navigate to: `http://localhost:3000`
+### 1. Prerequisites
+* Python 3.10+
+* Node.js 18+ (for local frontend dev)
+
+### 2. Environment Setup
+Create `backend/.env` with the following configuration:
+DATABASE_URL=postgresql+psycopg2://<user>:<password>@<neon-host>/neondb?sslmode=require
+SECRET_KEY=your_secret_key_here
+ALGORITHM=HS256
+
+### 3. Run the Target Mock App (Port 5000)
+Command: python custom_vuln_app/app.py
+
+### 4. Run the WAF Reverse Proxy (Port 8080)
+Command: python backend/run_waf.py
+
+### 5. Run the Backend API (Port 8000)
+Command: uvicorn backend.app.main:app --reload --port 8000
 
 ---
 
-## 7. How to Test Scans and WAF Logging
+## 🧪 Threat Verification & Testing
 
-### A. Register Target in Dashboard
-1. Go to `http://localhost:3000` and click the **Sites** tab.
-2. In the registration form:
-   - **Site Name:** `Local Mock Target`
-   - **Target URL:** `http://127.0.0.1:5000`
-   - **WAF Threshold:** `20`
-3. Click **Add Site**.
+### Test 1: SQL Injection Block (403 Forbidden)
+curl -i "http://localhost:8080/products?cat=1%20UNION%20SELECT%20null,username,password%20FROM%20users--"
 
-### B. Run a Vulnerability Scan
-1. Switch to the **Scans** tab.
-2. Select `Local Mock Target` from the dropdown list.
-3. Click **Run Scan**.
-4. The scanner checks for missing security headers (CSP, X-Frame-Options, X-Content-Type-Options) and query parameter reflection, returning an itemized audit report and risk score.
+### Test 2: Cross-Site Scripting Block (403 Forbidden)
+curl -i "http://localhost:8080/?comment=%3Cscript%3Ealert(document.cookie)%3C/script%3E"
 
-### C. Test WAF Detection & Rule Blocking
-Send synthetic requests through the WAF reverse proxy on port `8080`:
+### Test 3: Legitimate Pass-Through (200 OK)
+curl -i "http://localhost:8080/"
 
-1. **Legitimate Clean Request (Expected: Allowed 200 OK):**
-   ```bash
-   curl -i "http://127.0.0.1:8080/?q=hello_world"
-   ```
-
-2. **Trigger Anomaly Rule (Expected: Blocked 403 Forbidden):**
-   ```bash
-   curl -i "http://127.0.0.1:8080/?q=1'%20OR%201=1--"
-   ```
-
-3. **Verify Telemetry:**
-   - Go to the **WAF Logs** tab in the dashboard (`http://localhost:3000`).
-   - The table auto-polls every 4 seconds and displays the timestamp, client IP, method, incoming path, matched rule signature, calculated score, and final action (`ALLOW` or `BLOCK`).
+All actions reflect immediately inside the Live SOC Dashboard: https://sentrashield-gray.vercel.app
