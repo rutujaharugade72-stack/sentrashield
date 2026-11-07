@@ -1,6 +1,8 @@
 import hashlib
+import uuid
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends, HTTPException
+from typing import Optional
+from fastapi import FastAPI, Depends, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -13,6 +15,23 @@ Base.metadata.create_all(bind=engine)
 
 def hash_pw(password: str) -> str:
     return hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+def get_current_user(
+    authorization: Optional[str] = Header(None), 
+    db: Session = Depends(get_db)
+) -> models.User:
+    """Resolve current user via Authorization header, fallback to default local user."""
+    if authorization and authorization.startswith("Bearer sentra-token-"):
+        user_id = authorization.replace("Bearer sentra-token-", "").strip()
+        user = db.query(models.User).filter_by(id=user_id).first()
+        if user:
+            return user
+
+    # Fallback to default user so dashboard polling works seamlessly
+    user = db.query(models.User).filter_by(email="local@sentrashield.dev").first()
+    if not user:
+        raise HTTPException(status_code=401, detail="User not authenticated")
+    return user
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -54,7 +73,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Schemas (using standard str to avoid extra external dependencies)
+# Schemas
 class AuthRequest(BaseModel):
     email: str
     password: str
@@ -111,17 +130,20 @@ def login(payload: AuthRequest, db: Session = Depends(get_db)):
 
 # Sites Management
 @app.get("/api/sites")
-def list_sites(db: Session = Depends(get_db)):
-    return db.query(models.Site).order_by(models.Site.created_at.desc()).all()
+def list_sites(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    return db.query(models.Site).filter_by(tenant_id=current_user.tenant_id).order_by(models.Site.created_at.desc()).all()
 
 @app.post("/api/sites")
-def add_site(payload: SiteCreate, db: Session = Depends(get_db)):
-    tenant = db.query(models.Tenant).first()
-    if not tenant:
-        raise HTTPException(status_code=500, detail="Default tenant not initialized")
-    
+def add_site(
+    payload: SiteCreate, 
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     site = models.Site(
-        tenant_id=tenant.id,
+        tenant_id=current_user.tenant_id,
         name=payload.name,
         target_url=payload.target_url,
         block_threshold=payload.block_threshold,
@@ -167,5 +189,14 @@ async def trigger_scan(site_id: str, db: Session = Depends(get_db)):
 
 # WAF Logs
 @app.get("/api/waf-logs")
-def list_waf_logs(db: Session = Depends(get_db)):
-    return db.query(models.WAFLog).order_by(models.WAFLog.created_at.desc()).limit(100).all()
+def get_waf_logs(
+    current_user: models.User = Depends(get_current_user), 
+    db: Session = Depends(get_db)
+):
+    return (
+        db.query(models.WAFLog)
+        .filter(models.WAFLog.tenant_id == current_user.tenant_id)
+        .order_by(models.WAFLog.created_at.desc())
+        .limit(100)
+        .all()
+    )

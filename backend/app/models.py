@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Integer, DateTime, Boolean, Text
+from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, Text, Boolean
 from .database import Base
 
 class Tenant(Base):
@@ -40,11 +40,11 @@ class WAFLog(Base):
     __tablename__ = "waf_logs"
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     tenant_id = Column(String, index=True, nullable=True)
-    site_id = Column(String, nullable=True)
-    client_ip = Column(String)
-    method = Column(String)
-    path = Column(String)
-    rule_triggered = Column(String, default="Anomaly Inspection")
+    site_id = Column(String, ForeignKey("sites.id"), nullable=True)
+    client_ip = Column(String, nullable=False)
+    method = Column(String, default="GET")
+    path = Column(String, nullable=False)
+    rule_triggered = Column(String, nullable=False)
     anomaly_score = Column(Integer, default=0)
     action = Column(String, default="allow")
     created_at = Column(DateTime, default=datetime.utcnow)
