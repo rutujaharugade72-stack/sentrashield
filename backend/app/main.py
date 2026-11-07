@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -6,14 +7,43 @@ from .database import engine, Base, get_db
 from . import models
 from .scanner import run_security_scan
 
+# Ensure tables exist
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="SentraShield API")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Seed workspace and default user with clean session closure
+    db_gen = get_db()
+    db = next(db_gen)
+    try:
+        tenant = db.query(models.Tenant).first()
+        if not tenant:
+            tenant = models.Tenant(name="Local Workspace")
+            db.add(tenant)
+            db.commit()
+            db.refresh(tenant)
 
+        user = db.query(models.User).filter_by(email="local@sentrashield.dev").first()
+        if not user:
+            user = models.User(email="local@sentrashield.dev", tenant_id=tenant.id)
+            db.add(user)
+            db.commit()
+    finally:
+        # Properly executes the generator's finally block to close the session
+        try:
+            next(db_gen)
+        except StopIteration:
+            pass
+
+    yield  # Application runs here
+
+app = FastAPI(title="SentraShield API", lifespan=lifespan)
+
+# CORS setup for Vercel and local dashboard access
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -23,21 +53,10 @@ class SiteCreate(BaseModel):
     target_url: str
     block_threshold: int = 20
 
-@app.on_event("startup")
-def setup_seed_user():
-    db = next(get_db())
-    tenant = db.query(models.Tenant).first()
-    if not tenant:
-        tenant = models.Tenant(name="Local Workspace")
-        db.add(tenant)
-        db.commit()
-        db.refresh(tenant)
-    
-    user = db.query(models.User).filter_by(email="local@sentrashield.dev").first()
-    if not user:
-        user = models.User(email="local@sentrashield.dev", tenant_id=tenant.id)
-        db.add(user)
-        db.commit()
+@app.get("/")
+@app.get("/health")
+def health_check():
+    return {"status": "ok", "service": "SentraShield API"}
 
 @app.get("/api/sites")
 def list_sites(db: Session = Depends(get_db)):
@@ -46,6 +65,9 @@ def list_sites(db: Session = Depends(get_db)):
 @app.post("/api/sites")
 def add_site(payload: SiteCreate, db: Session = Depends(get_db)):
     tenant = db.query(models.Tenant).first()
+    if not tenant:
+        raise HTTPException(status_code=500, detail="Default tenant not initialized")
+    
     site = models.Site(
         tenant_id=tenant.id,
         name=payload.name,
@@ -62,6 +84,9 @@ def delete_site(site_id: str, db: Session = Depends(get_db)):
     site = db.query(models.Site).filter_by(id=site_id).first()
     if not site:
         raise HTTPException(status_code=404, detail="Site not found")
+    
+    # Clean up associated scans to prevent foreign key errors
+    db.query(models.Scan).filter_by(site_id=site.id).delete()
     db.delete(site)
     db.commit()
     return {"status": "deleted"}
