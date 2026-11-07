@@ -2,7 +2,7 @@ import hashlib
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from .database import engine, Base, get_db
 from . import models
@@ -54,9 +54,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Schemas
+# Schemas (using standard str to avoid extra external dependencies)
 class AuthRequest(BaseModel):
-    email: EmailStr
+    email: str
     password: str
 
 class SiteCreate(BaseModel):
