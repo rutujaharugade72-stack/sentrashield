@@ -60,10 +60,11 @@ export default function Login({ onLoginSuccess, apiBase }) {
     setLoading(true);
     setError('');
 
-    const endpoint = isRegister ? '/api/auth/register' : '/api/auth/login';
+    const action = isRegister ? 'register' : 'login';
+    const targetUrl = `https://sentrashield-api.onrender.com/api/auth/${action}`;
 
     try {
-      const res = await fetch(`${apiBase}${endpoint}`, {
+      const res = await fetch(targetUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),

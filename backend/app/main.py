@@ -1,7 +1,6 @@
 import hashlib
-import uuid
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends, HTTPException, Header
+from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
@@ -65,7 +64,7 @@ class SiteCreate(BaseModel):
     target_url: str
     block_threshold: int = 20
 
-# Health Checks
+# Health Check
 @app.get("/")
 @app.get("/health")
 def health_check():
@@ -78,7 +77,6 @@ def register(payload: AuthRequest, db: Session = Depends(get_db)):
     if existing:
         raise HTTPException(status_code=400, detail="User already registered with this email")
     
-    # Create isolated tenant for new registration
     tenant = models.Tenant(name=f"{payload.email.split('@')[0].capitalize()}'s Workspace")
     db.add(tenant)
     db.commit()
