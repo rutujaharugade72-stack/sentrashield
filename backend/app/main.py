@@ -1,45 +1,52 @@
+import hashlib
+import uuid
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 from .database import engine, Base, get_db
 from . import models
 from .scanner import run_security_scan
 
-# Ensure tables exist
+# Ensure tables exist in Neon
 Base.metadata.create_all(bind=engine)
+
+def hash_pw(password: str) -> str:
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Seed workspace and default user with clean session closure
+    # Ensure default workspace and baseline user exist
     db_gen = get_db()
     db = next(db_gen)
     try:
         tenant = db.query(models.Tenant).first()
         if not tenant:
-            tenant = models.Tenant(name="Local Workspace")
+            tenant = models.Tenant(name="Primary Workspace")
             db.add(tenant)
             db.commit()
             db.refresh(tenant)
 
         user = db.query(models.User).filter_by(email="local@sentrashield.dev").first()
         if not user:
-            user = models.User(email="local@sentrashield.dev", tenant_id=tenant.id)
+            user = models.User(
+                email="local@sentrashield.dev",
+                hashed_password=hash_pw("admin123"),
+                tenant_id=tenant.id
+            )
             db.add(user)
             db.commit()
     finally:
-        # Properly executes the generator's finally block to close the session
         try:
             next(db_gen)
         except StopIteration:
             pass
 
-    yield  # Application runs here
+    yield
 
 app = FastAPI(title="SentraShield API", lifespan=lifespan)
 
-# CORS setup for Vercel and local dashboard access
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -48,16 +55,63 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Schemas
+class AuthRequest(BaseModel):
+    email: EmailStr
+    password: str
+
 class SiteCreate(BaseModel):
     name: str
     target_url: str
     block_threshold: int = 20
 
+# Health Checks
 @app.get("/")
 @app.get("/health")
 def health_check():
     return {"status": "ok", "service": "SentraShield API"}
 
+# Authentication Endpoints
+@app.post("/api/auth/register")
+def register(payload: AuthRequest, db: Session = Depends(get_db)):
+    existing = db.query(models.User).filter_by(email=payload.email).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="User already registered with this email")
+    
+    # Create isolated tenant for new registration
+    tenant = models.Tenant(name=f"{payload.email.split('@')[0].capitalize()}'s Workspace")
+    db.add(tenant)
+    db.commit()
+    db.refresh(tenant)
+
+    user = models.User(
+        email=payload.email,
+        hashed_password=hash_pw(payload.password),
+        tenant_id=tenant.id
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    return {
+        "status": "success",
+        "token": f"sentra-token-{user.id}",
+        "user": {"id": user.id, "email": user.email, "tenant_id": user.tenant_id}
+    }
+
+@app.post("/api/auth/login")
+def login(payload: AuthRequest, db: Session = Depends(get_db)):
+    user = db.query(models.User).filter_by(email=payload.email).first()
+    if not user or user.hashed_password != hash_pw(payload.password):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    return {
+        "status": "success",
+        "token": f"sentra-token-{user.id}",
+        "user": {"id": user.id, "email": user.email, "tenant_id": user.tenant_id}
+    }
+
+# Sites Management
 @app.get("/api/sites")
 def list_sites(db: Session = Depends(get_db)):
     return db.query(models.Site).order_by(models.Site.created_at.desc()).all()
@@ -85,12 +139,12 @@ def delete_site(site_id: str, db: Session = Depends(get_db)):
     if not site:
         raise HTTPException(status_code=404, detail="Site not found")
     
-    # Clean up associated scans to prevent foreign key errors
     db.query(models.Scan).filter_by(site_id=site.id).delete()
     db.delete(site)
     db.commit()
     return {"status": "deleted"}
 
+# Scans
 @app.get("/api/scans")
 def list_scans(db: Session = Depends(get_db)):
     return db.query(models.Scan).order_by(models.Scan.created_at.desc()).all()
@@ -113,6 +167,7 @@ async def trigger_scan(site_id: str, db: Session = Depends(get_db)):
     db.refresh(scan)
     return scan
 
+# WAF Logs
 @app.get("/api/waf-logs")
 def list_waf_logs(db: Session = Depends(get_db)):
     return db.query(models.WAFLog).order_by(models.WAFLog.created_at.desc()).limit(100).all()
